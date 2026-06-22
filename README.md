@@ -11,14 +11,4 @@ The core functionality of this project lies in its multi-stage signal processing
 * **Shapiro Steps & Flux Quantum Approximation ($\Phi_0$):** The code reconstructs the baseline current-voltage (I-V) characteristics through numerical integration. It applies a local maxima detection algorithm with automated prominence thresholds to identify the quantized voltage steps under RF radiation, followed by a linear regression against the step indices to calculate the experimental magnetic flux quantum.
 * **Thermal Phase Transition Mapping:** To evaluate the cryogenic environment, the pipeline processes helium temperature logs over time. It calculates the second derivative of the warming rate ($\frac{d^2T}{dt^2} = 0$) to locate the exact mathematical inflection point corresponding to the lambda point ($T_\lambda$) transition.
 
-## Structure
-* `scripts/`: Source code for numerical integration, statistical fitting, and filtering algorithms.
-* `data/`: Raw experimental measurements (I-V sweeps, RF frequency/power logs, and temperature files).
 
-## Requirements
-* Python 3.x
-* NumPy, pandas, Matplotlib, SciPy
-
-## Usage
-1. Place the raw experimental datasets in the `data/` directory.
-2. Run the respective Python scripts inside the `scripts/` directory to process the data and compute the critical parameters directly in your local environment.
