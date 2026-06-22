@@ -1,0 +1,111 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+from scipy.integrate import cumulative_trapezoid
+from scipy.signal import savgol_filter, peak_widths
+
+# ==========================================
+# 1. SETUP
+# ==========================================
+file_path = r"C:\Users\ASUS\Desktop\josephson\part 1\Rt-R-15_34_43-24_12_2025 - verygood5.txt"
+
+file_name_base = os.path.basename(file_path).replace('.txt', '')
+output_folder = os.path.join("Analysis_Results", file_name_base)
+
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+
+# ==========================================
+# 2. LOAD & PREPARE DATA
+# ==========================================
+df = pd.read_csv(file_path, sep='\t', skiprows=1)
+df.columns = df.columns.str.strip()
+
+df['I_mA'] = df['dI/dV Current'] * 1e3
+df['dVdI_V_mA'] = (1 / df['dI/dV']) * 1e-3      
+df = df.sort_values(by='I_mA').reset_index(drop=True)
+
+# Smoothing
+window = 19
+poly = 9
+df['dVdI_smooth'] = savgol_filter(df['dVdI_V_mA'], window_length=window, polyorder=poly)
+
+# Determine Symmetric Bounds
+idx_peak_neg = df[df['I_mA'] < 0]['dVdI_smooth'].idxmax()
+idx_peak_pos = df[df['I_mA'] >= 0]['dVdI_smooth'].idxmax()
+offset = 15
+lower_idx = max(0, idx_peak_neg - offset)
+upper_idx = min(len(df) - 1, idx_peak_pos + offset)
+bound_val = max(abs(df.loc[lower_idx, 'I_mA']), abs(df.loc[upper_idx, 'I_mA']))
+
+df_sym = df[(df['I_mA'] >= -bound_val) & (df['I_mA'] <= bound_val)].copy().reset_index(drop=True)
+
+# ==========================================
+# 3. PEAK WIDTH & DEVIATION CALCULATION
+# ==========================================
+# Re-identify peaks in the symmetric dataframe
+pk_neg_idx = df_sym[df_sym['I_mA'] < 0]['dVdI_smooth'].idxmax()
+pk_pos_idx = df_sym[df_sym['I_mA'] >= 0]['dVdI_smooth'].idxmax()
+
+# Calculate widths at half-maximum (rel_height=0.5)
+# This returns [widths, width_heights, left_ips, right_ips]
+widths_info = peak_widths(df_sym['dVdI_smooth'], [pk_neg_idx, pk_pos_idx], rel_height=0.5)
+
+# Convert width from "number of points" to "mA"
+# We multiply the point-width by the average spacing between current points
+di = np.mean(np.diff(df_sym['I_mA']))
+width_mA_neg = widths_info[0][0] * di
+width_mA_pos = widths_info[0][1] * di
+
+# Deviation is half the width
+dev_neg = width_mA_neg / 2
+dev_pos = width_mA_pos / 2
+
+ic_neg = df_sym.loc[pk_neg_idx, 'I_mA']
+ic_pos = df_sym.loc[pk_pos_idx, 'I_mA']
+
+# ==========================================
+# 4. PLOTTING
+# ==========================================
+plt.figure(figsize=(10, 6))
+plt.plot(df_sym['I_mA'], df_sym['dVdI_smooth'], color='navy', linewidth=1.5, label='Smoothed $dV/dI$')
+
+# Draw the 'x' marks
+plt.scatter([ic_neg, ic_pos], [df_sym.loc[pk_neg_idx, 'dVdI_smooth'], df_sym.loc[pk_pos_idx, 'dVdI_smooth']], 
+            color='red', marker='x', s=100, linewidths=2, zorder=10)
+
+# Add error bars to the plot to visualize the deviation
+plt.errorbar([ic_neg, ic_pos], [df_sym.loc[pk_neg_idx, 'dVdI_smooth'], df_sym.loc[pk_pos_idx, 'dVdI_smooth']], 
+             xerr=[dev_neg, dev_pos], fmt='none', ecolor='red', capsize=5, label='Dev ($\pm$Width/2)')
+
+plt.annotate(f'$I_{{c-}}$: {ic_neg:.3f} $\pm$ {dev_neg:.3f} mA', (ic_neg, df_sym.loc[pk_neg_idx, 'dVdI_smooth']), 
+             textcoords="offset points", xytext=(0,15), ha='center', color='red', fontweight='bold')
+plt.annotate(f'$I_{{c+}}$: {ic_pos:.3f} $\pm$ {dev_pos:.3f} mA', (ic_pos, df_sym.loc[pk_pos_idx, 'dVdI_smooth']), 
+             textcoords="offset points", xytext=(0,15), ha='center', color='red', fontweight='bold')
+
+plt.title(f'Critical Current with Peak-Width Deviation\n[-0.4,0.4] range')
+plt.xlabel('Current $I$ (mA)')
+plt.ylabel('$dV/dI$ ($V/mA$)')
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.legend()
+
+plt.savefig(os.path.join(output_folder, f"{file_name_base}_Ic_with_Deviation.png"), dpi=300)
+plt.show()
+
+# ==========================================
+# 5. SAVE TO TEXT FILE
+# ==========================================
+results_path = os.path.join(output_folder, "Ic_deviation_results.txt")
+with open(results_path, "w") as f:
+    f.write(f"Analysis Results for: {file_name_base}\n")
+    f.write("="*40 + "\n")
+    f.write(f"Negative Ic: {ic_neg:.4f} mA\n")
+    f.write(f"Negative Dev: {dev_neg:.4f} mA (Width/2)\n")
+    f.write("-" * 20 + "\n")
+    f.write(f"Positive Ic: {ic_pos:.4f} mA\n")
+    f.write(f"Positive Dev: {dev_pos:.4f} mA (Width/2)\n")
+    f.write("-" * 20 + "\n")
+    f.write(f"Average Ic: {(abs(ic_neg) + ic_pos)/2:.4f} mA\n")
+
+print(f"Extraction complete. Results saved in: {output_folder}")
