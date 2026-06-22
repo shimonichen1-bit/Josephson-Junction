@@ -1,0 +1,109 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+from scipy.integrate import cumulative_trapezoid
+from scipy.signal import savgol_filter
+
+# ==========================================
+# 1. SETUP: CHANGE YOUR FILE PATH HERE
+# ==========================================
+file_path = r"C:\Users\ASUS\Desktop\josephson\part 1\Rt-R-15_34_43-24_12_2025 - verygood5.txt"
+
+# Extract filename and setup folder structure
+file_name_base = os.path.basename(file_path).replace('.txt', '')
+output_folder = os.path.join("Analysis_Results", file_name_base)
+
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+
+# ==========================================
+# 2. LOAD & PREPARE DATA
+# ==========================================
+df = pd.read_csv(file_path, sep='\t', skiprows=1)
+df.columns = df.columns.str.strip()
+
+# --- Unit Conversions (Using mA) ---
+df['I_mA'] = df['dI/dV Current'] * 1e3           # Amps to mA
+df['V_mV_measured'] = df['dI/dV Voltage'] * 1e3 # Volts to mV
+# dV/dI in V/mA
+df['dVdI_V_mA'] = (1 / df['dI/dV']) * 1e-3      
+df = df.sort_values(by='I_mA').reset_index(drop=True)
+
+# --- SMOOTHING STEP ---
+window = 19
+poly = 9
+df['dVdI_smooth'] = savgol_filter(df['dVdI_V_mA'], window_length=window, polyorder=poly)
+
+# Determine Symmetric Bounds
+idx_peak_neg = df[df['I_mA'] < 0]['dVdI_smooth'].idxmax()
+idx_peak_pos = df[df['I_mA'] >= 0]['dVdI_smooth'].idxmax()
+offset = 15
+lower_idx = max(0, idx_peak_neg - offset)
+upper_idx = min(len(df) - 1, idx_peak_pos + offset)
+bound_val = max(abs(df.loc[lower_idx, 'I_mA']), abs(df.loc[upper_idx, 'I_mA']))
+
+# Create the symmetric dataframe
+df_sym = df[(df['I_mA'] >= -bound_val) & (df['I_mA'] <= bound_val)].copy()
+
+# ==========================================
+# PART 1: Critical Current (dV/dI vs I in mA)
+# ==========================================
+plt.figure(figsize=(10, 6))
+
+plt.plot(df_sym['I_mA'], df_sym['dVdI_V_mA'], color='blue', alpha=0.15, label='Raw Data')
+plt.plot(df_sym['I_mA'], df_sym['dVdI_smooth'], color='navy', linewidth=1.5, label='Smoothed Resistance')
+
+# Find peaks on smoothed data
+pk_neg = df_sym[df_sym['I_mA'] < 0]['dVdI_smooth'].idxmax()
+pk_pos = df_sym[df_sym['I_mA'] >= 0]['dVdI_smooth'].idxmax()
+
+ic_neg_x, ic_neg_y = df_sym.loc[pk_neg, 'I_mA'], df_sym.loc[pk_neg, 'dVdI_smooth']
+ic_pos_x, ic_pos_y = df_sym.loc[pk_pos, 'I_mA'], df_sym.loc[pk_pos, 'dVdI_smooth']
+
+# MARK PEAKS WITH 'X'
+plt.scatter([ic_neg_x, ic_pos_x], [ic_neg_y, ic_pos_y], 
+            color='red', marker='x', s=100, linewidths=2, label='Critical Current $I_c$', zorder=10)
+
+# Annotations (Updated to mA)
+plt.annotate(f'$I_{{c-}}$: {ic_neg_x:.3f} mA', (ic_neg_x, ic_neg_y), 
+             textcoords="offset points", xytext=(0,10), ha='center', color='red', fontweight='bold')
+plt.annotate(f'$I_{{c+}}$: {ic_pos_x:.3f} mA', (ic_pos_x, ic_pos_y), 
+             textcoords="offset points", xytext=(0,10), ha='center', color='red', fontweight='bold')
+
+plt.title(f'dV/dI vs Current (mA): [-0.4,0.4] range', fontsize=12)
+plt.xlabel(r'Current $I$ ($mA$)')
+plt.ylabel(r'$dV/dI$ ($V/mA$)')
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.legend()
+
+plt.savefig(os.path.join(output_folder, f"{file_name_base}_Resistance_mA.png"), dpi=300)
+plt.show()
+
+# ==========================================
+# PART 2: Integrated Voltage (Calculated V)
+# ==========================================
+v_integrated = cumulative_trapezoid(df_sym['dVdI_smooth'], df_sym['I_mA'], initial=0)
+df_sym['V_mV_integrated'] = (v_integrated - v_integrated[len(v_integrated)//2]) * 1e3 
+
+plt.figure(figsize=(10, 6))
+plt.plot(df_sym['I_mA'], df_sym['V_mV_integrated'], color='darkgreen', linewidth=1.5)
+
+v_at_ic_neg = df_sym.loc[pk_neg, 'V_mV_integrated']
+v_at_ic_pos = df_sym.loc[pk_pos, 'V_mV_integrated']
+
+plt.scatter([ic_neg_x, ic_pos_x], [v_at_ic_neg, v_at_ic_pos], 
+            color='red', marker='x', s=100, linewidths=2, label='Critical Points', zorder=10)
+
+plt.axhline(0, color='black', lw=1, alpha=0.5)
+plt.axvline(0, color='black', lw=1, alpha=0.5)
+plt.title(f'Integrated IV Characteristic (mA): [-0.4,0.4] range', fontsize=12)
+plt.xlabel(r'Current $I$ ($mA$)')
+plt.ylabel(r'Voltage $V$ ($mV$)')
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.legend()
+
+plt.savefig(os.path.join(output_folder, f"{file_name_base}_Integrated_IV_mA.png"), dpi=300)
+plt.show()
+
+print(f"Success! Graphs in mA units saved in: {output_folder}")
